@@ -6,28 +6,95 @@ from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QBrush
 from PyQt5.QtCore import Qt, QRect, QSize, QObject, QFile, QIODevice
 from picamera import PiCamera
 from time import sleep
-import paramiko
-import scp
+# import paramiko
+# import scp
+import os
+import socket
+import struct
 
 ui = None
 preview = None
-camera = None
 x = 0 ; y = 0 ; w = 0 ;h = 0
 bClipped = False
-ssh = None
+#ssh = None
+camera = None
 old_time = datetime.now()
+PATH = "~/Documents/Projects/KilnProfiler"
+HOST = '192.168.0.17'
+PORT = 65432        # The port used by the server
+
+# def SubmitFile (filename):
+
+#     try:
+#         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+#             s.connect((host, PORT))
+#             with open(filename, "rb") as f:
+#                 byte = f.read(4096)
+#                 while byte != b"":
+#                     sa.send (byte)
+#                     byte = f.read(4096)
+#                 data = s.recv(1024)
+#                 print('Response: [{0}]'.format (data.decode('utf-8')))
+#     except ConnectionError as e:
+#         msg = "connection error for host {0} {1} {2}".format(host, e.errno, e.strerror)
+#         print (msg)
+#         raise Exception (msg)
+
+#     except IOError as e:
+#         msg = "transmission error on file {0} {1} {2}".format(filename, e.errno, e.strerror)
+#         print (msg)
+#         raise Exception (msg)
+
+def SubmitFile (orig_filename):
+    host = socket.gethostbyname(HOST)
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((host, PORT))
+            c = 'F'
+            filename = os.path.join (PATH, orig_filename)
+            fs = int (os.path.getsize(filename))
+
+            # 1 byte command
+            # 4 bytes for file size
+            # 100 bytes for file name
+            # total 105 bytes to be sent
+            data = struct.pack ('=cI100s', c.encode('utf-8'), fs, "{:<100}".format (orig_filename).encode ('utf-8'))
+            s.send (data)
+            total = 0
+            with open(filename, "rb") as f:
+                byte = f.read(4096)
+                while byte != b"":
+                    total += len(byte)
+                    s.send (byte)
+                    print ("Sent {0} bytes".format (total))
+                    byte = f.read(4096)
+                data = s.recv(1024)
+                temp = data.decode('utf-8')
+                return temp
+
+    except ConnectionError as e:
+        msg = "connection error for host {0} {1} {2}".format(host, e.errno, e.strerror)
+        print (msg)
+        raise Exception (msg)
+
+    except IOError as e:
+        msg = "transmission error on file {0} {1} {2}".format(filename, e.errno, e.strerror)
+        print (msg)
+        raise Exception (msg)
 
 def IsItTimeForSnap ():
     global old_time
     new_time = datetime.now()
     print ("time: {}".format((new_time - old_time).total_seconds()))
     ui.labTime.setText (datetime.now().strftime('%H:%M:%S'))
-    if ((new_time - old_time).total_seconds() >= 15):
+    if ((new_time - old_time).total_seconds() >= 120):
         TimeForSnap()
         old_time = new_time
 
 def TimeForSnap ():
-    global camera, ssh
+    #global camera, ssh
+    global camera
     global bClipped
     if bClipped == False:
         return
@@ -47,18 +114,28 @@ def TimeForSnap ():
     file.close()
     file = None
 
+    # Submit the file
+    # ---------------
+    # try:
+    #     sc = None
+    #     sc = scp.SCPClient (ssh.get_transport())
+    #     sc.put(filename)
+    # except Exception as e:
+    #     print (str(e))
+    #     ui.labMsg.setText(str(e))            
+    # finally:
+    #     if sc != None:
+    #         sc.close()
+    
+    temp = ''
     try:
-        sc = None
-        sc = scp.SCPClient (ssh.get_transport())
-        sc.put(filename)
+        temp = SubmitFile (filename)
     except Exception as e:
-        print (str(e))
-        ui.labMsg.setText(str(e))            
-    finally:
-        if sc != None:
-            sc.close()
+        ui.labMsg.setText (str(e))
+    else:
+        ui.labMsg.setText (filename)
+    print ("temp={0}".format(temp))
 
-    ui.labMsg.setText (filename)
     print ("scaling clipped image to {}".format (ui.labImage.PicSize))
     newpixmap = clippedPixmap.scaled (ui.labImage.PicSize, Qt.KeepAspectRatio)
     ui.labClippedImage.setPixmap (newpixmap)
@@ -83,7 +160,8 @@ class PreviewThread(threading.Thread):
             self.camera = None
 	
 def onRun (checked):
-    global camera, ssh
+    #global camera, ssh
+    global camera
     if (checked):
         if camera == None:
             camera = PiCamera()
@@ -91,20 +169,20 @@ def onRun (checked):
             camera.rotation = 270
             camera.start_preview(fullscreen=False, window=(ui.labImage.x(), ui.labImage.y(), ui.labImage.width(), ui.labImage.height()))
     
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.load_system_host_keys()
-            key = paramiko.RSAKey.from_private_key_file ("Brian_rsa")
-            ssh.connect ('192.168.2.27', username = 'brian', pkey = key)
-        except Exception as e:
-            print (str(e))
-            ui.labMsg.setText(str(e))            
+        # try:
+        #     ssh = paramiko.SSHClient()
+        #     ssh.load_system_host_keys()
+        #     key = paramiko.RSAKey.from_private_key_file ("Brian_rsa")
+        #     ssh.connect ('192.168.2.27', username = 'brian', pkey = key)
+        # except Exception as e:
+        #     print (str(e))
+        #     ui.labMsg.setText(str(e))            
 
         TimeForSnap ()
         ui.timer.start (1000)
     else:
-        ssh.close ()
-        ssh = None
+        # ssh.close ()
+        # ssh = None
         ui.timer.stop()
         camera.stop_preview()
         camera.close()
@@ -112,7 +190,8 @@ def onRun (checked):
 
 
 def onExit (checked):
-    global preview, camera, ssh
+    #global preview, camera, ssh
+    global preview, camera
     if preview is not None:
         if preview.is_alive():
             preview.stop()
@@ -122,9 +201,9 @@ def onExit (checked):
         camera.stop_preview()
         camera.close()
         camera = None     
-    if ssh != None:
-        ssh.close()
-        ssh = None
+    # if ssh != None:
+    #     ssh.close()
+    #     ssh = None
 
     QtCore.QCoreApplication.instance().quit()
 
