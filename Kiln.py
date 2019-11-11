@@ -19,8 +19,8 @@ bClipped = False
 #ssh = None
 camera = None
 old_time = datetime.now()
-PATH = "~/Documents/Projects/KilnProfiler"
-HOST = '192.168.0.17'
+PATH = "/home/pi/Documents/Projects/KilnProfiler"
+HOST = '192.168.2.11'
 PORT = 65432        # The port used by the server
 
 # def SubmitFile (filename):
@@ -48,12 +48,14 @@ PORT = 65432        # The port used by the server
 def SubmitFile (orig_filename):
     host = socket.gethostbyname(HOST)
 
+    filename = os.path.join (PATH, orig_filename)
+
     try:
+        fs = int (os.path.getsize(filename))
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(3)
             s.connect((host, PORT))
             c = 'F'
-            filename = os.path.join (PATH, orig_filename)
-            fs = int (os.path.getsize(filename))
 
             # 1 byte command
             # 4 bytes for file size
@@ -70,18 +72,22 @@ def SubmitFile (orig_filename):
                     print ("Sent {0} bytes".format (total))
                     byte = f.read(4096)
                 data = s.recv(1024)
-                temp = data.decode('utf-8')
-                return temp
-
+                print('Response: [{0}]'.format (data.decode('utf-8')))
+                return
     except ConnectionError as e:
-        msg = "connection error for host {0} {1} {2}".format(host, e.errno, e.strerror)
+        msg = "connection error for host {0} {1}".format(host, str(e))
         print (msg)
-        raise Exception (msg)
+        raise
+
+    except FileNotFoundError:
+        msg = "file {0} not found".format (filename)
+        print (msg)
+        raise
 
     except IOError as e:
-        msg = "transmission error on file {0} {1} {2}".format(filename, e.errno, e.strerror)
+        msg = "transmission error on file {0} {1}".format(orig_filename, str(e))
         print (msg)
-        raise Exception (msg)
+        raise
 
 def IsItTimeForSnap ():
     global old_time
